@@ -1,4 +1,9 @@
+import math
 import xml.etree.ElementTree as ET
+from asyncio.windows_events import INFINITE
+
+from pycurl import INFILE
+
 import Task
 import Scheduler
 import Cpu
@@ -25,6 +30,18 @@ def import_file(file_path, output_file):
             scheduler = Scheduler.HRRN(output_file)
         elif algorithm == 'SRTF':
             scheduler = Scheduler.SRTF(output_file)
+        elif algorithm == 'OBCP':
+            print("OBCP ALG")
+            policy = node.attrib.get("policy")
+            if policy is None:
+                raise Exception("No policy defined in the file")
+            scheduler = Scheduler.OBCP(output_file,policy)
+        elif algorithm == "EDF-VD":
+            print("EDF-VD")
+            policy = node.attrib.get("policy")
+            if policy is None:
+                raise Exception("No policy defined in the file")
+            scheduler = Scheduler.EDF_VD(output_file,policy)
         else:
             raise Exception(f'Invalid scheduler algorithm: {algorithm}')
 
@@ -33,6 +50,8 @@ def import_file(file_path, output_file):
     
     
     # Parsing the TASKS based on the TAG xml
+    #Count periodic tasks
+    countperiodic = 0
     for node in root_node.findall('./software/tasks/task'):
         _real_time = node.attrib.get('real_time', 'false') == 'true'
         _type = node.attrib['type']
@@ -41,16 +60,34 @@ def import_file(file_path, output_file):
         _activation = int(node.attrib.get('activation', -1))
         _deadline = int(node.attrib.get('deadline', -1))
         _wcet = int(node.attrib['wcet'])
+        if algorithm=="EDF-VD" or algorithm=="OBCP":
+            _wcet_high = int(node.attrib['wcet_high'])
+            _criticality = node.attrib['criticality']
+            if _wcet_high is None or _criticality is None:
+                raise Exception('Missing parameters')
+            elif (_wcet_high<=_wcet or _wcet_high>=_deadline):
+                raise Exception('Incosistent values')
 
         
         if _id < 0 or _wcet <= 0 or (_type == 'periodic' and _period <= 0) or (_type == 'sporadic' and _activation < 0):
             raise Exception('Non-positive values are saved in the file')
 
-        if (_wcet > _period != -1) or (_deadline != -1 and _deadline < _wcet):
+        if (_wcet > _period != -1) or (_deadline != -1 and _deadline < _wcet) :
             raise Exception('Inconsistent values are saved in the file')
 
-        task = Task.Task(_real_time, _type, _id, _period, _activation, _deadline, _wcet)
+        if _real_time=='false' and (algorithm=="EDF-VD" or algorithm=="OBCP"):
+            raise Exception('Non real time tasks cannot be used for OBCP or EDF-VD')
+        if _type == 'periodic':
+            countperiodic=+1
+
+        if algorithm=="EDF-VD" or algorithm == "OBCP":
+            task = Task.Task(_real_time, _type, _id, _period, _activation, _deadline, _wcet,_criticality,_wcet_high)
+        else:
+            task = Task.Task(_real_time, _type, _id, _period, _activation, _deadline, _wcet,None,None)
         scheduler.tasks.append(task)
+
+    if countperiodic==0 and policy=="Hyperperiod":
+        raise Exception('For hyperperiod policy must be at least one periodic task ')
 
 
     if not scheduler.tasks:

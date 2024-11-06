@@ -44,13 +44,12 @@ class SchedulerController:
         else:
             print("Scheduler not loaded.")
             return False
-
     def create_task(self, task_data):
         if self.scheduler:
             if task_data[1] == 'sporadic':
-                n_task = Task.Task(task_data[0], task_data[1], task_data[2], None, task_data[3], task_data[4], task_data[5])
+                n_task = Task.Task(task_data[0], task_data[1], task_data[2], None, task_data[3], task_data[4], task_data[5],task_data[6],task_data[7])
             elif task_data[1] == 'periodic':
-                n_task = Task.Task(task_data[0], task_data[1], task_data[2], task_data[3], None, task_data[4], task_data[5])
+                n_task = Task.Task(task_data[0], task_data[1], task_data[2], task_data[3], None, task_data[4], task_data[5],task_data[6],task_data[7])
             self.scheduler.new_task(n_task)
             self.scheduler.terminate()
             return True
@@ -85,7 +84,7 @@ class SchedulerController:
             print(f"Error while printing the file: {str(e)}")
             return False
 
-    def create_xml(self, file_path, start, end, tasks, scheduling_algorithm, cpu_pe_id, cpu_speed,quantum):
+    def create_xml(self, file_path, start, end, tasks, scheduling_algorithm, cpu_pe_id, cpu_speed,quantum,policy):
         try:
             # Creating the XML document
             doc = xml.dom.minidom.Document()
@@ -118,6 +117,8 @@ class SchedulerController:
             scheduler.setAttribute("algorithm", scheduling_algorithm)
             if scheduling_algorithm == "RR":
                 scheduler.setAttribute("quantum", str(quantum))
+            elif scheduling_algorithm == "EDF-VD" or scheduling_algorithm == "OBCP":
+                scheduler.setAttribute("policy",policy)
             software.appendChild(scheduler)
 
             # Adding the node for hardware

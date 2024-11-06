@@ -1,8 +1,12 @@
 import math
 import copy
 from abc import *
+
+from nltk.classify.maxent import calculate_nfmap
+
 import SchedEvent
 import SchedIO
+from functools import reduce
 
 
 class Scheduler:
@@ -38,6 +42,15 @@ class Scheduler:
         self.cores = []
 
         self.event_id = 0
+
+
+        self.mode = "low"
+        #Coefficent to mult the deadline during the EDF-VD algorythm. To be calculated
+        self.x = 0
+
+        self.policy = None
+
+        self.hyperperiod = None
 
 
 
@@ -730,3 +743,374 @@ class RoundRobin(Preemptive):
 
     def terminate(self):
         self.output_file.terminate_write()
+
+class OBCP(Preemptive):
+    def __init__(self, output_file,policy):
+        super().__init__(output_file)
+        self.name = 'OBCP'
+        self.policy = policy
+
+    def find_finish_eventsobcp(self,time):
+        if self.executing:
+            match self.mode:
+                case "low":
+                      if self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="low":
+                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task, SchedEvent.EventType.finish.value, self.executing.id)
+                          finish_event.job = self.executing.job
+                          self.output_file.add_scheduler_event(finish_event)
+                          # Delete from start_events:
+                          for event in self.start_events:
+                              if event.id == self.executing.id:
+                                  self.start_events.remove(event)
+                                  self.executing = None
+                                  break
+                      elif self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="high":
+                          self.mode = "high"
+                      elif self.executing.executing_time > self.executing.task.wcet and self.executing.task.criticality=="high":
+                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
+                                                                  SchedEvent.EventType.finish.value, self.executing.id)
+                          finish_event.job = self.executing.job
+                          self.output_file.add_scheduler_event(finish_event)
+                          # Delete from start_events:
+                          for event in self.start_events:
+                              if event.id == self.executing.id:
+                                  self.start_events.remove(event)
+                                  self.executing = None
+                                  break
+                case "high":
+                      if self.executing.executing_time == self.executing.task.wcet_high and self.executing.task.criticality == "high":
+                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
+                                                                  SchedEvent.EventType.finish.value, self.executing.id)
+                          finish_event.job = self.executing.job
+                          self.output_file.add_scheduler_event(finish_event)
+                          # Delete from start_events:
+                          for event in self.start_events:
+                              if event.id == self.executing.id:
+                                  self.start_events.remove(event)
+                                  self.executing = None
+                                  break
+
+    def choose_executed(self,time):
+        #Try switching on low mode based on the policy
+        self.switch_to_low(time)
+        print(self.mode)
+        if len(self.start_events) > 0 and self.mode=="low":
+            self.start_events.sort(key=lambda x: x.task.wcet)
+        elif len(self.start_events) > 0 and self.mode=="high":
+            self.start_events.sort(key=lambda x: x.task.criticality=="high",reverse=True)
+            # Non task is executed:
+        if self.executing is None and len(self.start_events)>0:
+                event = self.start_events[0]
+                event.timestamp = time
+                self.output_file.add_scheduler_event(event)
+                self.executing = event
+                # If the Ilde or Hyperperiod policy couldn't bring the mode to low and all the high tasks are finished
+                # the scheduler passes to low mode
+                if self.mode == "high" and event.task.criticality=="low":
+                    self.mode = "low"
+                # Create deadline event:
+                self.create_deadline_event(event)
+
+    def switch_to_low(self,time):
+        match self.policy:
+            case "Idle":
+                if self.executing is None:
+                    if self.mode == "high":
+                        self.mode = "low"
+                        print("Passing to low mode Idle policy")
+            case "Hyperperiod":
+                if time%self.hyperperiod==0 and self.mode=="high":
+                    self.mode = "low"
+                    print("Passing to low mode hyperperiod time: " + str(time) + ",hyperperiod: " + str(self.hyperperiod))
+
+    def calculate_hyper(self):
+        periods = []
+        for task in self.tasks:
+            if task.type == "periodic":
+                periods.append(task.period)
+        self.hyperperiod = reduce(math.lcm, periods)
+        print('Hyperperiod: ' + str(self.hyperperiod))
+
+    def execute(self):
+        if self.policy=="Hyperperiod":
+            self.calculate_hyper()
+        self.arrival_events = self.get_all_arrivals()
+        self.size = int(math.sqrt(self.end - self.start))
+        time = self.start
+        count = self.size - 1
+        self.compute(time, count)
+
+    def compute(self, time, count):
+        while time <= self.end:
+            self.find_finish_eventsobcp(time)
+            self.find_deadline_events(time)
+            self.find_arrival_event(time)
+            self.choose_executed(time)
+            if self.executing:
+                self.executing.executing_time += 1
+
+            count += 1
+            if count == self.size:
+                self.time_list.append(time)
+                self.finish_events_list.append(copy.deepcopy(self.finish_events))
+                self.deadline_events_list.append(copy.deepcopy(self.deadline_events))
+                self.arrival_events_list.append(copy.deepcopy(self.arrival_events))
+                self.start_events_list.append(copy.deepcopy(self.start_events))
+                self.executing_list.append(copy.deepcopy(self.executing))
+                count = 0
+            time += 1
+
+    def add_time(self, add_time):
+        self.add_arrivals(self.end, self.end + add_time)
+        pos = search_pos(self, self.end - 1)
+        self.finish_events = copy.deepcopy(self.finish_events_list[pos])
+        self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
+        self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
+        self.start_events = copy.deepcopy(self.start_events_list[pos])
+        self.executing = copy.deepcopy(self.executing_list[pos])
+        self.quantum_counter = self.quantum_counter_list[pos]
+        if self.executing:
+            self.executing = self.start_events[0]
+        self.end += add_time
+        time = self.time_list[pos] + 1
+        delete(self, time)
+        self.output_file.clean(time)
+        self.compute(time, self.start)
+
+    def new_task(self, new_task):
+        time = self.start
+        count = 0
+        new_task.core = self.cores[0].id
+        if new_task.type == 'sporadic' and new_task.activation > self.start:
+            time = new_task.activation
+            pos = search_pos(self, time - 1)
+            self.finish_events = copy.deepcopy(self.finish_events_list[pos])
+            self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
+            self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
+            self.start_events = copy.deepcopy(self.start_events_list[pos])
+            self.executing = copy.deepcopy(self.executing_list[pos])
+            if self.executing:
+                self.executing = self.start_events[0]
+            self.tasks.append(new_task)
+            new_task.init = new_task.activation
+            event = SchedEvent.ScheduleEvent(new_task.activation, new_task, SchedEvent.EventType.activation.value, self.event_id)
+            self.event_id += 1
+            for p in range(pos + 1):
+                self.arrival_events_list[p].append(copy.deepcopy(event))
+                self.arrival_events_list[p].sort(key=lambda x: x.timestamp)
+            self.arrival_events.append(copy.deepcopy(event))
+            self.arrival_events.sort(key=lambda x: x.timestamp)
+            time = self.time_list[pos] + 1
+            delete(self, time)
+        else:
+            reset(self)
+            self.tasks.append(new_task)
+            self.calculate_hyper()
+            self.arrival_events = self.get_all_arrivals()
+            count = self.size - 1
+        self.output_file.clean(time)
+        self.compute(time, count)
+
+    def terminate(self):
+        self.output_file.terminate_write()
+
+class EDF_VD(Preemptive):
+    def __init__(self, output_file,policy):
+        super().__init__(output_file)
+        self.name = 'EDF-VD'
+        self.policy = policy
+
+    def calculate(self):
+        ul = 0
+        ulh = 0
+        for task in self.tasks:
+            if task.criticality == "low":
+                ul = ul + task.wcet/task.deadline
+            if task.criticality == "high":
+                ulh = ulh + task.wcet/task.deadline
+        if ulh==0:
+            self.x = 1
+        else:
+            self.x = min(1,(1-ul)/ulh)
+            if self.x<=0:
+                self.x = 1
+        print("UL: " + str(ul))
+        print("ULh" + str(ulh))
+
+    def execute(self):
+        if self.policy=="Hyperperiod":
+            self.calculate_hyper()
+        self.calculate()
+        print("X coeff: " + str(self.x))
+        for task in self.tasks:
+            if task.criticality=="high":
+                task.virtual_deadline = task.virtual_deadline * self.x
+            else:
+                task.virtual_deadline = task.deadline
+        self.arrival_events = self.get_all_arrivals()
+        self.size = int(math.sqrt(self.end - self.start))
+        time = self.start
+        count = self.size - 1
+        self.compute(time, count)
+
+    def compute(self,time,count):
+        while time <= self.end:
+            self.find_finish_eventsEDF_VD(time)
+            self.find_deadline_events(time)
+            self.find_arrival_event(time)
+            self.choose_executed(time)
+            if self.executing:
+                self.executing.executing_time += 1
+
+            count += 1
+            if count == self.size:
+                self.time_list.append(time)
+                self.finish_events_list.append(copy.deepcopy(self.finish_events))
+                self.deadline_events_list.append(copy.deepcopy(self.deadline_events))
+                self.arrival_events_list.append(copy.deepcopy(self.arrival_events))
+                self.start_events_list.append(copy.deepcopy(self.start_events))
+                self.executing_list.append(copy.deepcopy(self.executing))
+                count = 0
+            time += 1
+
+    def find_finish_eventsEDF_VD(self,time):
+        if self.executing:
+            match self.mode:
+                case "low":
+                      if self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="low":
+                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task, SchedEvent.EventType.finish.value, self.executing.id)
+                          finish_event.job = self.executing.job
+                          self.output_file.add_scheduler_event(finish_event)
+                          # Delete from start_events:
+                          for event in self.start_events:
+                              if event.id == self.executing.id:
+                                  self.start_events.remove(event)
+                                  self.executing = None
+                                  break
+                      elif self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="high":
+                          self.mode = "high"
+                      elif self.executing.executing_time > self.executing.task.wcet and self.executing.task.criticality=="high":
+                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
+                                                                  SchedEvent.EventType.finish.value, self.executing.id)
+                          finish_event.job = self.executing.job
+                          self.output_file.add_scheduler_event(finish_event)
+                          # Delete from start_events:
+                          for event in self.start_events:
+                              if event.id == self.executing.id:
+                                  self.start_events.remove(event)
+                                  self.executing = None
+                                  break
+                case "high":
+                      if self.executing.executing_time == self.executing.task.wcet_high and self.executing.task.criticality == "high":
+                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
+                                                                  SchedEvent.EventType.finish.value, self.executing.id)
+                          finish_event.job = self.executing.job
+                          self.output_file.add_scheduler_event(finish_event)
+                          # Delete from start_events:
+                          for event in self.start_events:
+                              if event.id == self.executing.id:
+                                  self.start_events.remove(event)
+                                  self.executing = None
+                                  break
+
+    def choose_executed(self,time):
+        self.switch_to_low(time)
+        print(self.mode)
+        if len(self.start_events) > 0 and self.mode=="low":
+            self.start_events.sort(key=lambda x: x.task.virtual_deadline)
+        elif len(self.start_events) > 0 and self.mode=="high":
+            self.start_events.sort(key=lambda x: (x.task.criticality=="low",x.task.virtual_deadline))
+            # Non task is executed:
+        if self.executing is None and len(self.start_events)>0:
+                event = self.start_events[0]
+                event.timestamp = time
+                self.output_file.add_scheduler_event(event)
+                self.executing = event
+                #Switch to low mode if high tasks are finished
+                if event.task.criticality=="low" and self.mode=="high":
+                    self.mode = "low"
+                # Create deadline event:
+                self.create_deadline_event(event)
+
+    def switch_to_low(self,time):
+        match self.policy:
+            case "Idle":
+                if self.executing is None:
+                    if self.mode == "high":
+                        self.mode = "low"
+                        print("Passing to low mode Idle policy")
+            case "Hyperperiod":
+                if time%self.hyperperiod==0 and self.mode=="high":
+                    self.mode = "low"
+                    print("Passing to low mode hyperperiod policy. Time: " + str(time) + ", Hyperperiod: " + str(self.hyperperiod))
+
+    def calculate_hyper(self):
+        periods = []
+        for task in self.tasks:
+            if task.type == "periodic":
+                periods.append(task.period)
+        self.hyperperiod = reduce(math.lcm, periods)
+        print("Hyperperiod: " + str(self.hyperperiod))
+
+
+    def add_time(self, add_time):
+        self.add_arrivals(self.end, self.end + add_time)
+        pos = search_pos(self, self.end - 1)
+        self.finish_events = copy.deepcopy(self.finish_events_list[pos])
+        self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
+        self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
+        self.start_events = copy.deepcopy(self.start_events_list[pos])
+        self.executing = copy.deepcopy(self.executing_list[pos])
+        self.quantum_counter = self.quantum_counter_list[pos]
+        if self.executing:
+            self.executing = self.start_events[0]
+        self.end += add_time
+        time = self.time_list[pos] + 1
+        delete(self, time)
+        self.output_file.clean(time)
+        self.compute(time, self.start)
+
+    def new_task(self, new_task):
+        time = self.start
+        count = 0
+        new_task.core = self.cores[0].id
+        if new_task.type == 'sporadic' and new_task.activation > self.start:
+            time = new_task.activation
+            pos = search_pos(self, time - 1)
+            self.finish_events = copy.deepcopy(self.finish_events_list[pos])
+            self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
+            self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
+            self.start_events = copy.deepcopy(self.start_events_list[pos])
+            self.executing = copy.deepcopy(self.executing_list[pos])
+            if self.executing:
+                self.executing = self.start_events[0]
+            self.tasks.append(new_task)
+            new_task.init = new_task.activation
+            event = SchedEvent.ScheduleEvent(new_task.activation, new_task, SchedEvent.EventType.activation.value, self.event_id)
+            self.event_id += 1
+            for p in range(pos + 1):
+                self.arrival_events_list[p].append(copy.deepcopy(event))
+                self.arrival_events_list[p].sort(key=lambda x: x.timestamp)
+            self.arrival_events.append(copy.deepcopy(event))
+            self.arrival_events.sort(key=lambda x: x.timestamp)
+            time = self.time_list[pos] + 1
+            delete(self, time)
+        else:
+            reset(self)
+            self.tasks.append(new_task)
+            self.calculate_hyper()
+            self.arrival_events = self.get_all_arrivals()
+            count = self.size - 1
+        self.output_file.clean(time)
+        self.compute(time, count)
+
+    def terminate(self):
+        self.output_file.terminate_write()
+
+
+
+
+
+
+
+

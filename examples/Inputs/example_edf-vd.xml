@@ -1,22 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <simulation>
-	<time start="0" end="100" />	<!-- Simulation time -->
+	<time start="0" end="200" />	<!-- Simulation time -->
     <software>
         <tasks>
         	<!-- A task can be periodic or sporadic. The deadline parameter is relevant only for
         	     real-time tasks -->
             <task real-time="true" type="sporadic" id="1" activation="10" deadline="50"  wcet="5" criticality="high" wcet_high = "8" />
-            <task real-time="true" type="periodic" id="2" period="20" deadline="30" wcet="10" criticality="low" wcet_high = "12"/>
-            <task real-time="true" type="sporadic" id="3" activation="5" deadline="50"  wcet="20" criticality="low" wcet_high = "21"/>
+            <task real-time="true" type="periodic" id="2" period="15" deadline="40" wcet="10" criticality="low" wcet_high = "12"/>
+            <task real-time="true" type="sporadic" id="3" activation="25" deadline="45"  wcet="20" criticality="high" wcet_high = "21"/>
             <task real-time="true" type="sporadic" id="4" activation="10" deadline="40" wcet="15" criticality="high" wcet_high = "18"/>
+            <task real-time="true" type="periodic" id="5" period="27" deadline="55" wcet="25" criticality="low" wcet_high = "29"/>
+
+
         </tasks>
-        <scheduler algorithm="FIFO"/>	<!-- add any relevant numbers, such as quantum time for RR -->
+        <scheduler algorithm="EDF-VD" policy = "Hyperperiod"/>	<!-- add any relevant numbers, such as quantum time for RR -->
     </software>
     <hardware>
     	<cpus>
     		<pe id="0" speed="1" />	<!-- Speed represents the multiplicator for the wcet. For instance
     		                             A task with wcet=10 running of a core with 1.25 speed it takes
-    		                              8 time units to execute -->
+         	                              8 time units to execute -->
     	</cpus>
     </hardware>
 </simulation>

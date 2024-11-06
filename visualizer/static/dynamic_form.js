@@ -89,6 +89,17 @@ $(document).ready(function() {
                     <label for="wcet_${taskCount}">WCET</label>
                     <input type="number" id="wcet_${taskCount}" name="wcet_${taskCount}" required>
                 </div>
+                <div class="form-group">
+                    <label for = "wcet_high_${taskCount}">WCET_HIGH</label>
+                    <input type="number" id="wcet_high_${taskCount}" name="wcet_high_${taskCount}" required>
+                </div>
+                <div class="form-group">
+                    <label for = "criticcality_${taskCount}">Criticality</label>
+                    <select id="criticality_${taskCount}" name="criticality_${taskCount}">
+                        <option value="high">High-Criticality</option>
+                        <option value="low">Low-Criticality</option>
+                    </select>
+                </div>
             </form>
         `;
         $('#dynamicTaskForm').append(dynamicFormHtml);
@@ -132,6 +143,8 @@ $(document).ready(function() {
             const activation = parseInt($(`#activation_${i}`).val()) || 0;
             const deadline = parseInt($(`#deadline_${i}`).val());
             const wcet = parseInt($(`#wcet_${i}`).val());
+            const wcet_high = parseInt($(`#wcet_high_${i}`).val());
+            const criticality = $('#criticality_${i}').val();
 
             if (taskId <= 0 || wcet <= 0 || deadline <= 0) {
                 alert(`Invalid inputs for task ${i}.`);
@@ -140,7 +153,7 @@ $(document).ready(function() {
 
             if ((taskType === 'periodic' && (period <= 0 || period >= deadline || wcet > period)) ||
                 (taskType === 'sporadic' && activation < 0) ||
-                (deadline < wcet)) {
+                (deadline < wcet) || (deadline<wcet_high) || (wcet_high<=wcet)) {
                 alert(`Invalid scheduling parameters for task ${i}.`);
                 return;
             }
@@ -152,6 +165,8 @@ $(document).ready(function() {
             allTasksData.push(activation);
             allTasksData.push(deadline);
             allTasksData.push(wcet);
+            allTasksData.push(wcet_high);
+            allTasksData.push(criticality);
         }
 
         $.ajax({

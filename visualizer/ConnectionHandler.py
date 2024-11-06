@@ -74,11 +74,13 @@ def create_task():
     activation = request.form.get('activation')
     deadline = request.form.get('deadline')
     wcet = request.form.get('wcet')
+    wcet_high = request.form.get('wcet_high')
+    criticality = request.form.get('criticality')
     if task_type=='periodic':
-        if not all([real_time, task_type, task_id, period, deadline, wcet]):
+        if not all([real_time, task_type, task_id, period, deadline, wcet,wcet_high,criticality]):
             return jsonify({'error': 'All fields are required.'}), 400
     elif task_type=='sporadic':
-        if not all([real_time, task_type, task_id, activation, deadline, wcet]):
+        if not all([real_time, task_type, task_id, activation, deadline, wcet,wcet_high,criticality]):
             return jsonify({'error': 'All fields are required.'}), 400
     
     # Convert values to appropriate types
@@ -93,14 +95,15 @@ def create_task():
             period=0
         deadline = int(deadline)
         wcet = int(wcet)
+        wcet_high = int(wcet_high)
     except ValueError:
         return jsonify({'error': 'Invalid input format.'}), 400
 
     # Perform additional checks on the values
     if task_id <= 0:
         return jsonify({'error': 'Task ID must be a positive integer.'}), 400
-    if wcet <= 0:
-        return jsonify({'error': 'WCET must be a positive integer.'}), 400
+    if wcet <= 0 | wcet_high<=0 :
+        return jsonify({'error': 'WCET and WCET_HIGH must be a positive integer.'}), 400
     if (task_type == 'periodic' and period <= 0) or (task_type == 'sporadic' and activation < 0):
         return jsonify({'error': 'Invalid period or activation value.'}), 400
     if deadline <= 0:
@@ -109,14 +112,19 @@ def create_task():
         return jsonify({'error': 'WCET must be less than or equal to period.'}), 400
     if deadline < wcet:
         return jsonify({'error': 'Deadline must be greater than WCET.'}), 400
+    if wcet_high<wcet | wcet_high>deadline:
+        return jsonify({'error':'WCET_HIGH must be greater than WCET and lower than Deadline'})
+    if not real_time and (scheduler_controller.scheduler.name == "OBCP" or scheduler_controller.scheduler.name == "EDF-VD"):
+        return jsonify({'error':'Non real-time tasks in EDF-VD and OBCP are not accepted'})
+
 
     
-    print(f'Real Time: {real_time}, Task Type: {task_type}, Task ID: {task_id}, Period: {period}, Activation: {activation}, Deadline: {deadline}, WCET: {wcet}')
+    print(f'Real Time: {real_time}, Task Type: {task_type}, Task ID: {task_id}, Period: {period}, Activation: {activation}, Deadline: {deadline}, WCET: {wcet},WCET_HIGH:{wcet_high},Criticality:{criticality}')
     
     if task_type == "sporadic":
-        success = scheduler_controller.create_task([real_time, task_type, task_id, activation, deadline, wcet])
+        success = scheduler_controller.create_task([real_time, task_type, task_id, activation, deadline, wcet,criticality,wcet_high])
     elif task_type == "periodic":
-        success = scheduler_controller.create_task([real_time, task_type, task_id, period, activation, deadline, wcet])
+        success = scheduler_controller.create_task([real_time, task_type, task_id, period, activation, deadline, wcet,criticality,wcet_high])
     
     if success:
         return jsonify({'message': 'Task created successfully!'}), 200
@@ -199,14 +207,16 @@ def submit_all_tasks():
     try:
         data = request.get_json()
         print(len(data))
-        total_task = int((len(data)-4)/7)
+        total_task = int((len(data)-4)/9)
         
         start = int(data[0])
         end = int(data[1])
         scheduling_algorithm = data[2]
         if scheduling_algorithm == "RR":
             quantum = int(data[3])
-        else: 
+        elif scheduling_algorithm == "OBCP" or scheduling_algorithm=="EDF-VD":
+            policy = data[3]
+        else:
             quantum = 0
         pos = 4
         tasks = []
@@ -219,7 +229,9 @@ def submit_all_tasks():
             activation = data[pos+4] 
             deadline = data[pos+5]
             wcet = data[pos+6]
-            pos += 7
+            wcet_high = data[pos+7]
+            criticality = data[pos+8]
+            pos += 9
 
             if task_type=='periodic':
                 if not all([real_time, task_type, task_id, period, deadline, wcet]):
@@ -239,22 +251,25 @@ def submit_all_tasks():
                     period=0
                 deadline = int(deadline)
                 wcet = int(wcet)
+                wcet_high = int(wcet_high)
             except ValueError:
                 return jsonify({'error': 'Invalid input format.'}), 400
 
             # Perform additional checks on the values
             if task_id <= 0:
                 return jsonify({'error': 'Task ID must be a positive integer.'}), 400
-            if wcet <= 0:
-                return jsonify({'error': 'WCET must be a positive integer.'}), 400
+            if wcet <= 0 & wcet_high<=0:
+                return jsonify({'error': 'WCET and WCET_HIGH must be a positive integer.'}), 400
             if (task_type == 'periodic' and period <= 0) or (task_type == 'sporadic' and activation < 0):
                 return jsonify({'error': 'Invalid period or activation value.'}), 400
             if deadline <= 0:
                 return jsonify({'error': 'Deadline must be a positive integer.'}), 400
             if task_type == 'periodic' and wcet > period :
                 return jsonify({'error': 'WCET must be less than or equal to period.'}), 400
-            if deadline < wcet:
-                return jsonify({'error': 'Deadline must be greater than WCET.'}), 400
+            if deadline < wcet & deadline<wcet_high:
+                return jsonify({'error': 'Deadline must be greater than WCET and WCET_HIGH.'}), 400
+            if wcet_high<=wcet:
+                return jsonify({'error':'WCET_HIGH must be greater than WCET.'}), 400
             if scheduling_algorithm == "RR" and quantum < 0:
                 return jsonify({'error': 'Quantum must be greater than 0.'}), 400
             if start < 0:
@@ -269,7 +284,10 @@ def submit_all_tasks():
                     "id": task_id,
                     "period": period,
                     "deadline": deadline,
-                    "wcet": wcet
+                    "wcet": wcet,
+                    "criticality": criticality,
+                    "wcet_high":wcet_high
+
                 }
             elif task_type == 'sporadic':
                 task = {
@@ -278,7 +296,10 @@ def submit_all_tasks():
                     "id": task_id,
                     "activation": activation,
                     "deadline": deadline,
-                    "wcet": wcet
+                    "wcet": wcet,
+                    "criticality": criticality,
+                    "wcet_high": wcet_high
+
                 }
             tasks.append(task)
 
@@ -289,7 +310,7 @@ def submit_all_tasks():
         # Add the file name "temp.xml" to the temporary directory path
         temp_file_path = os.path.join(temp_dir, "temp.xml")
         # Execute XML file creation using SchedulerController's create_xml method
-        xml_path = scheduler_controller.create_xml(temp_file_path, int(start), int(end), tasks, scheduling_algorithm, 0, 1, quantum)
+        xml_path = scheduler_controller.create_xml(temp_file_path, int(start), int(end), tasks, scheduling_algorithm, 0, 1, quantum,policy)
 
         if xml_path:
             return jsonify({'message': 'XML file created successfully!', 'xml_path': xml_path}), 200

@@ -30,13 +30,19 @@ document.addEventListener('DOMContentLoaded', function() {
     function toggleFieldsQuantum() {
         var schedulingAlgorithm = $('#schedulingAlgorithm').val();
         var quantumGroup = $('#quantumGroup');
+        var policyGroup = $('#policy');
 
         if (schedulingAlgorithm === "RR") {
             console.log("Showing Quantum");
             quantumGroup.removeClass("hidden");
-        } else {
+        }
+        else if(schedulingAlgorithm === "EDF-VD" || schedulingAlgorithm==="OBCP"){
+            policyGroup.removeClass("hidden")
+        }
+         else {
             console.log("Hiding Quantum");
             quantumGroup.addClass("hidden");
+            policyGroup.addClass("hidden")
         }
     }
     $('#schedulingAlgorithm').change(toggleFieldsQuantum);

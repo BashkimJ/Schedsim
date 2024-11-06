@@ -31,14 +31,14 @@ if __name__ == "__main__":
         # Try the new implemented functionality
         
         # SPORADIC
-        new_task = Task.Task(True, 'sporadic', 5, None, 15, 100, 5)
+        new_task = Task.Task(True, 'sporadic', 5, None, 15, 100, 5,"high",10)
         scheduler.new_task(new_task)
 
         # ADD_TIME
         scheduler.add_time(40)
         
         # PERIODIC
-        new_task = Task.Task(True, 'periodic', 8, 10, None, 100, 5)
+        new_task = Task.Task(True, 'periodic', 8, 10, None, 100, 5,"low",15)
         scheduler.new_task(new_task)
         
         # CREATE GRAPH
