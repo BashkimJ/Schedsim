@@ -21,7 +21,7 @@ def compare_files(file1, file2):
         print("Not correct")
 
 if __name__ == "__main__":
-    alg = random.randint(0, 4)
+    alg = random.randint(0, 6)
     if alg == 0:
         scheduling_algorithm = "FIFO"
     if alg == 1:
