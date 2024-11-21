@@ -744,13 +744,32 @@ class RoundRobin(Preemptive):
     def terminate(self):
         self.output_file.terminate_write()
 
-class OBCP(Preemptive):
-    def __init__(self, output_file,policy):
-        super().__init__(output_file)
-        self.name = 'OBCP'
-        self.policy = policy
 
-    def find_finish_eventsobcp(self,time):
+class Critical(Scheduler):
+    """
+    This class represents the critical type of possible scheduling algorithms. It extends the Scheduler class
+    and will be extended by all the classes that implement real-time scheduling algorithms that deal with tasks
+    that can have two criticality levels.
+    """
+
+    def __init__(self, output_file):
+        """
+        This method initializes the Critical class extending the scheduler.
+        :param output_file: The file where all the finishing events are going to be written.
+        """
+        super().__init__(output_file)
+        self.name = 'RealTimeCriticalScheduler'
+
+    def execute(self):
+        pass
+
+    def find_finish_events(self, time):
+        """
+        This method finds based on the actual time of the scheduler and timestamp of the events, the finishing events.
+        Once  a finishing event is found it is directly written in the output file.
+        :param time: The current time in which the scheduler is running.
+        :return: No parameter is returned.
+        """
         if self.executing:
             match self.mode:
                 case "low":
@@ -766,17 +785,6 @@ class OBCP(Preemptive):
                                   break
                       elif self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="high":
                           self.mode = "high"
-                      elif self.executing.executing_time > self.executing.task.wcet and self.executing.task.criticality=="high":
-                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
-                                                                  SchedEvent.EventType.finish.value, self.executing.id)
-                          finish_event.job = self.executing.job
-                          self.output_file.add_scheduler_event(finish_event)
-                          # Delete from start_events:
-                          for event in self.start_events:
-                              if event.id == self.executing.id:
-                                  self.start_events.remove(event)
-                                  self.executing = None
-                                  break
                 case "high":
                       if self.executing.executing_time == self.executing.task.wcet_high and self.executing.task.criticality == "high":
                           finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
@@ -790,7 +798,123 @@ class OBCP(Preemptive):
                                   self.executing = None
                                   break
 
+    def create_deadline_event(self, event):
+        """
+        This method creates a deadline event. It is the same as the one defined in the Preemptive Class.
+        :param event: The event for which we want to create the deadline corresponding event.
+        :return:The function does not return any parameter.
+        """
+        if event.task.real_time:
+            deadline_timestamp = event.timestamp + event.task.deadline
+            deadline_event = SchedEvent.ScheduleEvent(
+                deadline_timestamp, event.task, SchedEvent.EventType.deadline.value, event.id)
+            deadline_event.job = event.job
+            self.deadline_events.append(deadline_event)
+            event.task.first_time_executing = False
+    def calculate_hyper(self):
+        """
+        This method calculates the hyperperiod value used in case of  Hyperperiod policy switching mode.
+        :return: No value is returned from this method.
+        """
+        periods = []
+        for task in self.tasks:
+            if task.type == "periodic":
+                periods.append(task.period)
+        self.hyperperiod = reduce(math.lcm, periods)
+        print('Hyperperiod: ' + str(self.hyperperiod))
+    def switch_to_low(self,time):
+        """
+        This method is responsible for switching the scheduler into the low mode depending on the two possible
+        policies: Hyperperiod or Idle state.
+        :param time: The current time in which the scheduler is running.
+        :return: No value is returned from this method.
+        """
+        match self.policy:
+            case "Idle":
+                if self.executing is None:
+                    if self.mode == "high":
+                        self.mode = "low"
+                        print("Passing to low mode Idle policy")
+            case "Hyperperiod":
+                if time%self.hyperperiod==0 and self.mode=="high" and self.executing.criticality!="high":
+                    self.mode = "low"
+                    print("Passing to low mode hyperperiod time: " + str(time) + ",hyperperiod: " + str(self.hyperperiod))
+    def add_time(self, add_time):
+        self.add_arrivals(self.end, self.end + add_time)
+        pos = search_pos(self, self.end - 1)
+        self.finish_events = copy.deepcopy(self.finish_events_list[pos])
+        self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
+        self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
+        self.start_events = copy.deepcopy(self.start_events_list[pos])
+        self.executing = copy.deepcopy(self.executing_list[pos])
+        self.quantum_counter = self.quantum_counter_list[pos]
+        if self.executing:
+            self.executing = self.start_events[0]
+        self.end += add_time
+        time = self.time_list[pos] + 1
+        delete(self, time)
+        self.output_file.clean(time)
+        self.compute(time, self.start)
+
+    def new_task(self, new_task):
+        time = self.start
+        count = 0
+        new_task.core = self.cores[0].id
+        if new_task.type == 'sporadic' and new_task.activation > self.start:
+            time = new_task.activation
+            pos = search_pos(self, time - 1)
+            self.finish_events = copy.deepcopy(self.finish_events_list[pos])
+            self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
+            self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
+            self.start_events = copy.deepcopy(self.start_events_list[pos])
+            self.executing = copy.deepcopy(self.executing_list[pos])
+            if self.executing:
+                self.executing = self.start_events[0]
+            self.tasks.append(new_task)
+            new_task.init = new_task.activation
+            event = SchedEvent.ScheduleEvent(new_task.activation, new_task, SchedEvent.EventType.activation.value, self.event_id)
+            self.event_id += 1
+            for p in range(pos + 1):
+                self.arrival_events_list[p].append(copy.deepcopy(event))
+                self.arrival_events_list[p].sort(key=lambda x: x.timestamp)
+            self.arrival_events.append(copy.deepcopy(event))
+            self.arrival_events.sort(key=lambda x: x.timestamp)
+            time = self.time_list[pos] + 1
+            delete(self, time)
+        else:
+            reset(self)
+            self.tasks.append(new_task)
+            self.calculate_hyper()
+            self.arrival_events = self.get_all_arrivals()
+            count = self.size - 1
+        self.output_file.clean(time)
+        self.compute(time, count)
+    def compute(self,time,count):
+        pass
+
+class OBCP(Critical):
+    """
+    The OBCP class extends the Critical class, and it implements the OBCP algorithm for real-time systems with two
+    possible criticality levels low and high.
+    """
+    def __init__(self, output_file,policy):
+        """
+        This method initializes the OBCP class.
+        :param output_file: The file where the finishing events are going to be written.
+        :param policy: The policy that is going to be used by the OBCP algorithm to switch from high mode to low mode.
+        In this implementation can take only two values: "Hypeperiod" or "Idle".
+        """
+        super().__init__(output_file)
+        self.name = 'OBCP'
+        self.policy = policy
+
     def choose_executed(self,time):
+        """
+        This method chooses the current event(task) that must be in execution. This is done based on how the events are
+        sorted in the start_events list of the scheduler.
+        :param time: The current time in which the scheduler is running.
+        :return: No value is returned.
+        """
         #Try switching on low mode based on the policy
         self.switch_to_low(time)
         print(self.mode)
@@ -811,27 +935,11 @@ class OBCP(Preemptive):
                 # Create deadline event:
                 self.create_deadline_event(event)
 
-    def switch_to_low(self,time):
-        match self.policy:
-            case "Idle":
-                if self.executing is None:
-                    if self.mode == "high":
-                        self.mode = "low"
-                        print("Passing to low mode Idle policy")
-            case "Hyperperiod":
-                if time%self.hyperperiod==0 and self.mode=="high":
-                    self.mode = "low"
-                    print("Passing to low mode hyperperiod time: " + str(time) + ",hyperperiod: " + str(self.hyperperiod))
-
-    def calculate_hyper(self):
-        periods = []
-        for task in self.tasks:
-            if task.type == "periodic":
-                periods.append(task.period)
-        self.hyperperiod = reduce(math.lcm, periods)
-        print('Hyperperiod: ' + str(self.hyperperiod))
-
     def execute(self):
+        """
+        This method executes the OBCP algorithm.
+        :return: No return value from this method.
+        """
         if self.policy=="Hyperperiod":
             self.calculate_hyper()
         self.arrival_events = self.get_all_arrivals()
@@ -842,7 +950,7 @@ class OBCP(Preemptive):
 
     def compute(self, time, count):
         while time <= self.end:
-            self.find_finish_eventsobcp(time)
+            self.find_finish_events(time)
             self.find_deadline_events(time)
             self.find_arrival_event(time)
             self.choose_executed(time)
@@ -860,67 +968,30 @@ class OBCP(Preemptive):
                 count = 0
             time += 1
 
-    def add_time(self, add_time):
-        self.add_arrivals(self.end, self.end + add_time)
-        pos = search_pos(self, self.end - 1)
-        self.finish_events = copy.deepcopy(self.finish_events_list[pos])
-        self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
-        self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
-        self.start_events = copy.deepcopy(self.start_events_list[pos])
-        self.executing = copy.deepcopy(self.executing_list[pos])
-        self.quantum_counter = self.quantum_counter_list[pos]
-        if self.executing:
-            self.executing = self.start_events[0]
-        self.end += add_time
-        time = self.time_list[pos] + 1
-        delete(self, time)
-        self.output_file.clean(time)
-        self.compute(time, self.start)
-
-    def new_task(self, new_task):
-        time = self.start
-        count = 0
-        new_task.core = self.cores[0].id
-        if new_task.type == 'sporadic' and new_task.activation > self.start:
-            time = new_task.activation
-            pos = search_pos(self, time - 1)
-            self.finish_events = copy.deepcopy(self.finish_events_list[pos])
-            self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
-            self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
-            self.start_events = copy.deepcopy(self.start_events_list[pos])
-            self.executing = copy.deepcopy(self.executing_list[pos])
-            if self.executing:
-                self.executing = self.start_events[0]
-            self.tasks.append(new_task)
-            new_task.init = new_task.activation
-            event = SchedEvent.ScheduleEvent(new_task.activation, new_task, SchedEvent.EventType.activation.value, self.event_id)
-            self.event_id += 1
-            for p in range(pos + 1):
-                self.arrival_events_list[p].append(copy.deepcopy(event))
-                self.arrival_events_list[p].sort(key=lambda x: x.timestamp)
-            self.arrival_events.append(copy.deepcopy(event))
-            self.arrival_events.sort(key=lambda x: x.timestamp)
-            time = self.time_list[pos] + 1
-            delete(self, time)
-        else:
-            reset(self)
-            self.tasks.append(new_task)
-            self.calculate_hyper()
-            self.arrival_events = self.get_all_arrivals()
-            count = self.size - 1
-        self.output_file.clean(time)
-        self.compute(time, count)
-
     def terminate(self):
         self.output_file.terminate_write()
 
-class EDF_VD(Preemptive):
+class EDF_VD(Critical):
+    """
+    The EDF_VD class extends the Critical class, and it implements the EDF_VD algorithm for real-time systems with two
+    possible criticality levels low and high.
+    """
     def __init__(self, output_file,policy):
+        """
+               This method initializes the EDF_VD class.
+               :param output_file: The file where the finishing events are going to be written.
+               :param policy: The policy that is going to be used by the EDF_VD algorithm to switch from high mode to low mode.
+               In this implementation can take only two values: "Hypeperiod" or "Idle".
+        """
         super().__init__(output_file)
         self.name = 'EDF-VD'
         self.policy = policy
 
     def calculate(self):
+        """
+        The method calculates the coefficient X witch will multiply the VD of every high criticality task.
+        :return: No parameter is returned.
+        """
         ul = 0
         ulh = 0
         for task in self.tasks:
@@ -938,6 +1009,10 @@ class EDF_VD(Preemptive):
         print("ULh" + str(ulh))
 
     def execute(self):
+        """
+        The method executes the EDF-VD algorithm.
+        :return: No parameter is returned.
+        """
         if self.policy=="Hyperperiod":
             self.calculate_hyper()
         self.calculate()
@@ -955,7 +1030,7 @@ class EDF_VD(Preemptive):
 
     def compute(self,time,count):
         while time <= self.end:
-            self.find_finish_eventsEDF_VD(time)
+            self.find_finish_events(time)
             self.find_deadline_events(time)
             self.find_arrival_event(time)
             self.choose_executed(time)
@@ -973,47 +1048,13 @@ class EDF_VD(Preemptive):
                 count = 0
             time += 1
 
-    def find_finish_eventsEDF_VD(self,time):
-        if self.executing:
-            match self.mode:
-                case "low":
-                      if self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="low":
-                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task, SchedEvent.EventType.finish.value, self.executing.id)
-                          finish_event.job = self.executing.job
-                          self.output_file.add_scheduler_event(finish_event)
-                          # Delete from start_events:
-                          for event in self.start_events:
-                              if event.id == self.executing.id:
-                                  self.start_events.remove(event)
-                                  self.executing = None
-                                  break
-                      elif self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="high":
-                          self.mode = "high"
-                      elif self.executing.executing_time > self.executing.task.wcet and self.executing.task.criticality=="high":
-                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
-                                                                  SchedEvent.EventType.finish.value, self.executing.id)
-                          finish_event.job = self.executing.job
-                          self.output_file.add_scheduler_event(finish_event)
-                          # Delete from start_events:
-                          for event in self.start_events:
-                              if event.id == self.executing.id:
-                                  self.start_events.remove(event)
-                                  self.executing = None
-                                  break
-                case "high":
-                      if self.executing.executing_time == self.executing.task.wcet_high and self.executing.task.criticality == "high":
-                          finish_event = SchedEvent.ScheduleEvent(time, self.executing.task,
-                                                                  SchedEvent.EventType.finish.value, self.executing.id)
-                          finish_event.job = self.executing.job
-                          self.output_file.add_scheduler_event(finish_event)
-                          # Delete from start_events:
-                          for event in self.start_events:
-                              if event.id == self.executing.id:
-                                  self.start_events.remove(event)
-                                  self.executing = None
-                                  break
-
     def choose_executed(self,time):
+        """
+                This method chooses the current event(task) that must be in execution. This is done based on how the events are
+                sorted in the start_events list of the scheduler.
+                :param time: The current time in which the scheduler is running.
+                :return: No value is returned.
+        """
         self.switch_to_low(time)
         print(self.mode)
         if len(self.start_events) > 0 and self.mode=="low":
@@ -1032,85 +1073,5 @@ class EDF_VD(Preemptive):
                 # Create deadline event:
                 self.create_deadline_event(event)
 
-    def switch_to_low(self,time):
-        match self.policy:
-            case "Idle":
-                if self.executing is None:
-                    if self.mode == "high":
-                        self.mode = "low"
-                        print("Passing to low mode Idle policy")
-            case "Hyperperiod":
-                if time%self.hyperperiod==0 and self.mode=="high":
-                    self.mode = "low"
-                    print("Passing to low mode hyperperiod policy. Time: " + str(time) + ", Hyperperiod: " + str(self.hyperperiod))
-
-    def calculate_hyper(self):
-        periods = []
-        for task in self.tasks:
-            if task.type == "periodic":
-                periods.append(task.period)
-        self.hyperperiod = reduce(math.lcm, periods)
-        print("Hyperperiod: " + str(self.hyperperiod))
-
-
-    def add_time(self, add_time):
-        self.add_arrivals(self.end, self.end + add_time)
-        pos = search_pos(self, self.end - 1)
-        self.finish_events = copy.deepcopy(self.finish_events_list[pos])
-        self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
-        self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
-        self.start_events = copy.deepcopy(self.start_events_list[pos])
-        self.executing = copy.deepcopy(self.executing_list[pos])
-        self.quantum_counter = self.quantum_counter_list[pos]
-        if self.executing:
-            self.executing = self.start_events[0]
-        self.end += add_time
-        time = self.time_list[pos] + 1
-        delete(self, time)
-        self.output_file.clean(time)
-        self.compute(time, self.start)
-
-    def new_task(self, new_task):
-        time = self.start
-        count = 0
-        new_task.core = self.cores[0].id
-        if new_task.type == 'sporadic' and new_task.activation > self.start:
-            time = new_task.activation
-            pos = search_pos(self, time - 1)
-            self.finish_events = copy.deepcopy(self.finish_events_list[pos])
-            self.deadline_events = copy.deepcopy(self.deadline_events_list[pos])
-            self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
-            self.start_events = copy.deepcopy(self.start_events_list[pos])
-            self.executing = copy.deepcopy(self.executing_list[pos])
-            if self.executing:
-                self.executing = self.start_events[0]
-            self.tasks.append(new_task)
-            new_task.init = new_task.activation
-            event = SchedEvent.ScheduleEvent(new_task.activation, new_task, SchedEvent.EventType.activation.value, self.event_id)
-            self.event_id += 1
-            for p in range(pos + 1):
-                self.arrival_events_list[p].append(copy.deepcopy(event))
-                self.arrival_events_list[p].sort(key=lambda x: x.timestamp)
-            self.arrival_events.append(copy.deepcopy(event))
-            self.arrival_events.sort(key=lambda x: x.timestamp)
-            time = self.time_list[pos] + 1
-            delete(self, time)
-        else:
-            reset(self)
-            self.tasks.append(new_task)
-            self.calculate_hyper()
-            self.arrival_events = self.get_all_arrivals()
-            count = self.size - 1
-        self.output_file.clean(time)
-        self.compute(time, count)
-
     def terminate(self):
         self.output_file.terminate_write()
-
-
-
-
-
-
-
-
