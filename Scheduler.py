@@ -860,6 +860,11 @@ class Critical(Scheduler):
         time = self.start
         count = 0
         new_task.core = self.cores[0].id
+        if self.name == "EDF-VD":
+            if new_task.criticality == "high":
+                new_task.virtual_deadline = new_task.deadline * self.x
+            else:
+                new_task.virtual_deadline = new_task.deadline
         if new_task.type == 'sporadic' and new_task.activation > self.start:
             time = new_task.activation
             pos = search_pos(self, time - 1)
@@ -989,7 +994,7 @@ class EDF_VD(Critical):
 
     def calculate(self):
         """
-        The method calculates the coefficient X witch will multiply the VD of every high criticality task.
+        The method calculates the coefficient X witch will multiply the deadline of every high criticality task.
         :return: No parameter is returned.
         """
         ul = 0
@@ -1019,9 +1024,10 @@ class EDF_VD(Critical):
         print("X coeff: " + str(self.x))
         for task in self.tasks:
             if task.criticality=="high":
-                task.virtual_deadline = task.virtual_deadline * self.x
+                task.virtual_deadline = task.deadline * self.x
             else:
                 task.virtual_deadline = task.deadline
+            print(str(task.id) + ": " + str(task.virtual_deadline))
         self.arrival_events = self.get_all_arrivals()
         self.size = int(math.sqrt(self.end - self.start))
         time = self.start
@@ -1058,11 +1064,16 @@ class EDF_VD(Critical):
         self.switch_to_low(time)
         print(self.mode)
         if len(self.start_events) > 0 and self.mode=="low":
-            self.start_events.sort(key=lambda x: x.task.virtual_deadline)
+            self.start_events.sort(key=lambda x: x.task.virtual_deadline - time)
         elif len(self.start_events) > 0 and self.mode=="high":
-            self.start_events.sort(key=lambda x: (x.task.criticality=="low",x.task.virtual_deadline))
-            # Non task is executed:
-        if self.executing is None and len(self.start_events)>0:
+            self.start_events.sort(key=lambda x: (x.task.criticality=="low",x.task.deadline - time))
+
+        #Try switching the current running task with one in a higher priority
+        if self.executing and self.mode=="low":
+            self.try_to_switch(time)
+
+        # Non task is executed:
+        elif self.executing is None and len(self.start_events)>0:
                 event = self.start_events[0]
                 event.timestamp = time
                 self.output_file.add_scheduler_event(event)
@@ -1072,6 +1083,32 @@ class EDF_VD(Critical):
                     self.mode = "low"
                 # Create deadline event:
                 self.create_deadline_event(event)
+
+    def try_to_switch(self,time):
+        """
+        The method switches the current event executing with one of a higher priority.
+        :param time: The current time in whitch the scheduler is running.
+        :return: No parameter is returned
+        """
+        if self.executing.task.criticality == "low":
+            if self.executing.task.virtual_deadline - time > self.start_events[0].task.virtual_deadline - time and self.executing.id!=self.start_events[0].id:
+                finish_timestamp = time
+                finish_event = SchedEvent.ScheduleEvent(
+                    finish_timestamp, self.executing.task, SchedEvent.EventType.finish.value, self.executing.id)
+                finish_event.job = self.executing.job
+                self.output_file.add_scheduler_event(finish_event)
+                # Change task:
+                event = self.start_events[0]
+                event.timestamp = time
+                self.output_file.add_scheduler_event(event)
+                self.executing = event
+                print("Switching task; time = " + str(time))
+                # Create deadline event:
+                if event.task.first_time_executing:
+                    self.create_deadline_event(event)
+
+
+
 
     def terminate(self):
         self.output_file.terminate_write()
