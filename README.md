@@ -2,9 +2,8 @@
 SchedSim is a collection of tools to test task scheduling algorithm (both real-time and non real-time).
 The software is currently under development by [HEAPLab](https://heaplab.deib.polimi.it) students and researchers.
 
-## Contributors
-- Santarossa Noah
-- Romano Luca
+## Contributors on this branch
+- Bashkim Jance
 
 ## Execute
 <p align="center">
