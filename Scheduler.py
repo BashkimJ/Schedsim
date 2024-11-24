@@ -847,9 +847,6 @@ class Critical(Scheduler):
         self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
         self.start_events = copy.deepcopy(self.start_events_list[pos])
         self.executing = copy.deepcopy(self.executing_list[pos])
-        self.quantum_counter = self.quantum_counter_list[pos]
-        if self.executing:
-            self.executing = self.start_events[0]
         self.end += add_time
         time = self.time_list[pos] + 1
         delete(self, time)
