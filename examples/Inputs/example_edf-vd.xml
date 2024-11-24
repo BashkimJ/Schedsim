@@ -11,7 +11,6 @@
             <task real-time="true" type="sporadic" id="4" activation="10" deadline="40" wcet="15" criticality="high" wcet_high = "18"/>
             <task real-time="true" type="periodic" id="5" period="27" deadline="55" wcet="25" criticality="low" wcet_high = "29"/>
 
-
         </tasks>
         <scheduler algorithm="EDF-VD" policy = "Hyperperiod"/>	<!-- add any relevant numbers, such as quantum time for RR -->
     </software>
