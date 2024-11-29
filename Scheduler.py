@@ -759,7 +759,6 @@ class Critical(Scheduler):
         """
         super().__init__(output_file)
         self.name = 'RealTimeCriticalScheduler'
-
     def execute(self):
         pass
 
@@ -811,6 +810,7 @@ class Critical(Scheduler):
             deadline_event.job = event.job
             self.deadline_events.append(deadline_event)
             event.task.first_time_executing = False
+
     def calculate_hyper(self):
         """
         This method calculates the hyperperiod value used in case of  Hyperperiod policy switching mode.
@@ -822,6 +822,7 @@ class Critical(Scheduler):
                 periods.append(task.period)
         self.hyperperiod = reduce(math.lcm, periods)
         print('Hyperperiod: ' + str(self.hyperperiod))
+
     def switch_to_low(self,time):
         """
         This method is responsible for switching the scheduler into the low mode depending on the two possible
@@ -839,6 +840,10 @@ class Critical(Scheduler):
                 if time%self.hyperperiod==0 and self.mode=="high" and self.executing.criticality!="high":
                     self.mode = "low"
                     print("Passing to low mode hyperperiod time: " + str(time) + ",hyperperiod: " + str(self.hyperperiod))
+
+    def compute(self,time,count):
+        pass
+
     def add_time(self, add_time):
         self.add_arrivals(self.end, self.end + add_time)
         pos = search_pos(self, self.end - 1)
@@ -854,14 +859,10 @@ class Critical(Scheduler):
         self.compute(time, self.start)
 
     def new_task(self, new_task):
+        print(str(new_task.deadline))
         time = self.start
         count = 0
         new_task.core = self.cores[0].id
-        if self.name == "EDF-VD":
-            if new_task.criticality == "high":
-                new_task.virtual_deadline = new_task.deadline * self.x
-            else:
-                new_task.virtual_deadline = new_task.deadline
         if new_task.type == 'sporadic' and new_task.activation > self.start:
             time = new_task.activation
             pos = search_pos(self, time - 1)
@@ -870,8 +871,6 @@ class Critical(Scheduler):
             self.arrival_events = copy.deepcopy(self.arrival_events_list[pos])
             self.start_events = copy.deepcopy(self.start_events_list[pos])
             self.executing = copy.deepcopy(self.executing_list[pos])
-            if self.executing:
-                self.executing = self.start_events[0]
             self.tasks.append(new_task)
             new_task.init = new_task.activation
             event = SchedEvent.ScheduleEvent(new_task.activation, new_task, SchedEvent.EventType.activation.value, self.event_id)
@@ -886,13 +885,11 @@ class Critical(Scheduler):
         else:
             reset(self)
             self.tasks.append(new_task)
-            self.calculate_hyper()
             self.arrival_events = self.get_all_arrivals()
             count = self.size - 1
         self.output_file.clean(time)
         self.compute(time, count)
-    def compute(self,time,count):
-        pass
+
 
 class OBCP(Critical):
     """
@@ -919,7 +916,7 @@ class OBCP(Critical):
         """
         #Try switching on low mode based on the policy
         self.switch_to_low(time)
-        print(self.mode)
+        print(str(time) + ":" + str(self.mode))
         if len(self.start_events) > 0 and self.mode=="low":
             self.start_events.sort(key=lambda x: x.task.wcet)
         elif len(self.start_events) > 0 and self.mode=="high":
@@ -942,8 +939,6 @@ class OBCP(Critical):
         This method executes the OBCP algorithm.
         :return: No return value from this method.
         """
-        if self.policy=="Hyperperiod":
-            self.calculate_hyper()
         self.arrival_events = self.get_all_arrivals()
         self.size = int(math.sqrt(self.end - self.start))
         time = self.start
@@ -951,6 +946,8 @@ class OBCP(Critical):
         self.compute(time, count)
 
     def compute(self, time, count):
+        if self.policy=="Hyperperiod":
+            self.calculate_hyper()
         while time <= self.end:
             self.find_finish_events(time)
             self.find_deadline_events(time)
@@ -972,6 +969,7 @@ class OBCP(Critical):
 
     def terminate(self):
         self.output_file.terminate_write()
+
 
 class EDF_VD(Critical):
     """
@@ -1015,6 +1013,14 @@ class EDF_VD(Critical):
         The method executes the EDF-VD algorithm.
         :return: No parameter is returned.
         """
+        self.arrival_events = self.get_all_arrivals()
+        self.size = int(math.sqrt(self.end - self.start))
+        time = self.start
+        count = self.size - 1
+        self.compute(time, count)
+
+
+    def compute(self,time,count):
         if self.policy=="Hyperperiod":
             self.calculate_hyper()
         self.calculate()
@@ -1025,13 +1031,6 @@ class EDF_VD(Critical):
             else:
                 task.virtual_deadline = task.deadline
             print(str(task.id) + ": " + str(task.virtual_deadline))
-        self.arrival_events = self.get_all_arrivals()
-        self.size = int(math.sqrt(self.end - self.start))
-        time = self.start
-        count = self.size - 1
-        self.compute(time, count)
-
-    def compute(self,time,count):
         while time <= self.end:
             self.find_finish_events(time)
             self.find_deadline_events(time)
@@ -1059,7 +1058,7 @@ class EDF_VD(Critical):
                 :return: No value is returned.
         """
         self.switch_to_low(time)
-        print(self.mode)
+        print(str(time) + ":" + str(self.mode))
         if len(self.start_events) > 0 and self.mode=="low":
             self.start_events.sort(key=lambda x: x.task.virtual_deadline - time)
         elif len(self.start_events) > 0 and self.mode=="high":
@@ -1103,9 +1102,6 @@ class EDF_VD(Critical):
                 # Create deadline event:
                 if event.task.first_time_executing:
                     self.create_deadline_event(event)
-
-
-
 
     def terminate(self):
         self.output_file.terminate_write()

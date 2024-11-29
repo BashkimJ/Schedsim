@@ -49,7 +49,7 @@ class SchedulerController:
             if task_data[1] == 'sporadic':
                 n_task = Task.Task(task_data[0], task_data[1], task_data[2], None, task_data[3], task_data[4], task_data[5],task_data[6],task_data[7])
             elif task_data[1] == 'periodic':
-                n_task = Task.Task(task_data[0], task_data[1], task_data[2], task_data[3], None, task_data[4], task_data[5],task_data[6],task_data[7])
+                n_task = Task.Task(task_data[0], task_data[1], task_data[2], task_data[3], None, task_data[5], task_data[6],task_data[7],task_data[8])
             self.scheduler.new_task(n_task)
             self.scheduler.terminate()
             return True

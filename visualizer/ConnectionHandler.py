@@ -98,7 +98,6 @@ def create_task():
         wcet_high = int(wcet_high)
     except ValueError:
         return jsonify({'error': 'Invalid input format.'}), 400
-
     # Perform additional checks on the values
     if task_id <= 0:
         return jsonify({'error': 'Task ID must be a positive integer.'}), 400
@@ -125,7 +124,6 @@ def create_task():
         success = scheduler_controller.create_task([real_time, task_type, task_id, activation, deadline, wcet,criticality,wcet_high])
     elif task_type == "periodic":
         success = scheduler_controller.create_task([real_time, task_type, task_id, period, activation, deadline, wcet,criticality,wcet_high])
-    
     if success:
         return jsonify({'message': 'Task created successfully!'}), 200
     else:
