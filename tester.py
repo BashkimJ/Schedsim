@@ -32,6 +32,10 @@ if __name__ == "__main__":
         scheduling_algorithm = "SRTF"
     if alg == 4:
         scheduling_algorithm = "RR"
+    if alg == 5:
+        scheduling_algorithm = "OBCP"
+    if alg == 6:
+        scheduling_algorithm = "EDF-VD"
     time_start = random.randint(0, MAX_TIME_START)
     time_end = random.randint(time_start + 1, MAX_TIME_END)
     add_time = random.randint(1, MAX_TIME_END)
@@ -50,7 +54,10 @@ if __name__ == "__main__":
     new_tasks = []
 
     for task in range(1, TASKS_NUMS + 1):
-        real_time = random.randint(0, 1)
+        if scheduling_algorithm!="OBCP" and scheduling_algorithm!="EDF-VD":
+            real_time = random.randint(0, 1)
+        else:
+            real_time = 1
         real_time_str = ''
         if real_time == 0:
             real_time = False
@@ -63,55 +70,69 @@ if __name__ == "__main__":
         period = None
         deadline = None
         wcet = None
+        wcet_high = None
+        criticality = None
         if type == 0:
             type = 'sporadic'
             activation = random.randint(time_start, time_end - 1)
             deadline = random.randint(activation + 1, MAX_TIME_END)
             wcet = random.randint(1, max(1, deadline - 1))
+            wcet_high = random.randint(wcet,max(1, deadline-1))
         else:
             type = 'periodic'
             period = random.randint(1, MAX_PERIOD)
             deadline = random.randint(time_start + 1, MAX_TIME_END)
             wcet = random.randint(1, max(1, min(period, deadline)))
+            wcet_high = random.randint(wcet,max(1, deadline-1))
+        choice = random.randint(0, 1)
+        if choice==1:
+            criticality = "high"
+        else:
+            criticality = "low"
         id = task
         if type == 'sporadic':
             if real_time:
-                add_task1 = ET.SubElement(tasks1, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), deadline=str(deadline), wcet=str(wcet))
+                add_task1 = ET.SubElement(tasks1, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), deadline=str(deadline), wcet=str(wcet), criticality=str(criticality), wcet_high=str(wcet_high))
                 add_task1.tail = "\n"
                 if task <= TASKS_NUMS - NEW_TASKS_NUMS:
-                    add_task2 = ET.SubElement(tasks2, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), deadline=str(deadline), wcet=str(wcet))
+                    add_task2 = ET.SubElement(tasks2, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), deadline=str(deadline), wcet=str(wcet),criticality=str(criticality), wcet_high=str(wcet_high))
                     add_task2.tail = "\n"
                 else:
-                    new_task = Task.Task(real_time, type, task, None, activation, deadline, wcet)
+                    new_task = Task.Task(real_time, type, task, None, activation, deadline, wcet, criticality, wcet_high)
                     new_tasks.append(new_task)
             else:
-                add_task1 = ET.SubElement(tasks1, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), wcet=str(wcet))
+                add_task1 = ET.SubElement(tasks1, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), wcet=str(wcet), criticality=str(criticality), wcet_high=str(wcet_high))
                 add_task1.tail = "\n"
                 if task <= TASKS_NUMS - NEW_TASKS_NUMS:
-                    add_task2 = ET.SubElement(tasks2, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), wcet=str(wcet))
+                    add_task2 = ET.SubElement(tasks2, "task", real_time=real_time_str, type="sporadic", id=str(id), activation=str(activation), wcet=str(wcet), criticality=str(criticality), wcet_high=str(wcet_high))
                     add_task2.tail = "\n"
                 else:
-                    new_task = Task.Task(real_time, type, task, None, activation, deadline, wcet)
+                    new_task = Task.Task(real_time, type, task, None, activation, deadline, wcet, criticality, wcet_high)
                     new_tasks.append(new_task)
         else:
-            add_task1 = ET.SubElement(tasks1, "task", real_time=real_time_str, type="periodic", id=str(id), period=str(period), deadline=str(deadline), wcet=str(wcet))
+            add_task1 = ET.SubElement(tasks1, "task", real_time=real_time_str, type="periodic", id=str(id), period=str(period), deadline=str(deadline), wcet=str(wcet), criticality=str(criticality), wcet_high=str(wcet_high))
             add_task1.tail = "\n"
             if task <= TASKS_NUMS - NEW_TASKS_NUMS:
-                add_task2 = ET.SubElement(tasks2, "task", real_time=real_time_str, type="periodic", id=str(id), period=str(period), deadline=str(deadline), wcet=str(wcet))
+                add_task2 = ET.SubElement(tasks2, "task", real_time=real_time_str, type="periodic", id=str(id), period=str(period), deadline=str(deadline), wcet=str(wcet), criticality=str(criticality), wcet_high=str(wcet_high))
                 add_task2.tail = "\n"
             else:
-                new_task = Task.Task(real_time, type, task, period, None, deadline, wcet)
+                new_task = Task.Task(real_time, type, task, period, None, deadline, wcet,criticality,wcet_high)
                 new_tasks.append(new_task)
-    if scheduling_algorithm != "RR":
+    if scheduling_algorithm != "RR" and scheduling_algorithm!="OBCP" and scheduling_algorithm!="EDF-VD":
         scheduler1 = ET.SubElement(software1, "scheduler", algorithm=scheduling_algorithm)
         scheduler1.tail = "\n"
         scheduler2 = ET.SubElement(software2, "scheduler", algorithm=scheduling_algorithm)
         scheduler2.tail = "\n"
-    else:
+    elif scheduling_algorithm=="RR":
         quantum = random.randint(1, MAX_QUANTUM)
         scheduler1 = ET.SubElement(software1, "scheduler", algorithm=scheduling_algorithm, quantum=str(quantum))
         scheduler1.tail = "\n"
         scheduler2 = ET.SubElement(software2, "scheduler", algorithm=scheduling_algorithm, quantum=str(quantum))
+        scheduler2.tail = "\n"
+    if scheduling_algorithm=="OBCP" or scheduling_algorithm=="EDF-VD":
+        scheduler1 = ET.SubElement(software1, "scheduler", algorithm=scheduling_algorithm, policy="Idle")
+        scheduler1.tail = "\n"
+        scheduler2 = ET.SubElement(software2, "scheduler", algorithm=scheduling_algorithm, policy="Hyperperiod")
         scheduler2.tail = "\n"
     hardware1 = ET.SubElement(simulation1, "hardware")
     hardware2 = ET.SubElement(simulation2, "hardware")
