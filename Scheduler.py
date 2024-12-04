@@ -52,6 +52,8 @@ class Scheduler:
 
         self.hyperperiod = None
 
+        self.previous_order = []
+
 
 
     @abstractmethod
@@ -780,8 +782,14 @@ class Critical(Scheduler):
                           for event in self.start_events:
                               if event.id == self.executing.id:
                                   self.start_events.remove(event)
-                                  self.executing = None
                                   break
+                          #Delete from previous_order list in case of an OBCP alg
+                          if len(self.previous_order)>0:
+                              for event in self.previous_order:
+                                  if event.id == self.executing.id:
+                                      self.previous_order.remove(event)
+                                      break
+                          self.executing = None
                       elif self.executing.executing_time == self.executing.task.wcet and self.executing.task.criticality=="high":
                           self.mode = "high"
                 case "high":
@@ -794,8 +802,13 @@ class Critical(Scheduler):
                           for event in self.start_events:
                               if event.id == self.executing.id:
                                   self.start_events.remove(event)
-                                  self.executing = None
                                   break
+                          if len(self.previous_order) > 0:
+                              for event in self.previous_order:
+                                if event.id == self.executing.id:
+                                    self.previous_order.remove(event)
+                                    break
+                          self.executing = None
 
     def create_deadline_event(self, event):
         """
@@ -917,9 +930,11 @@ class OBCP(Critical):
         #Try switching on low mode based on the policy
         self.switch_to_low(time)
         print(str(time) + ":" + str(self.mode))
-        if len(self.start_events) > 0 and self.mode=="low":
-            self.start_events.sort(key=lambda x: x.task.wcet)
-        elif len(self.start_events) > 0 and self.mode=="high":
+        if len(self.start_events) > 0 and self.mode == "low":
+            if len(self.previous_order) > 0:
+                self.start_events = self.previous_order
+        if len(self.start_events) > 0 and self.mode=="high":
+            self.previous_order = self.start_events.copy()
             self.start_events.sort(key=lambda x: x.task.criticality=="high",reverse=True)
             # Non task is executed:
         if self.executing is None and len(self.start_events)>0:
