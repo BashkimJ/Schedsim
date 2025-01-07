@@ -839,7 +839,7 @@ class Critical(Scheduler):
                         self.mode = "low"
                         print("Passing to low mode Idle policy")
             case "Hyperperiod":
-                if time%self.hyperperiod==0 and self.mode=="high" and self.executing.criticality!="high":
+                if time%self.hyperperiod==0 and self.mode=="high" and self.executing.task.criticality!="high":
                     self.mode = "low"
                     print("Passing to low mode hyperperiod time: " + str(time) + ",hyperperiod: " + str(self.hyperperiod))
 
