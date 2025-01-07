@@ -24,4 +24,3 @@ class Task:
 
 
 
-        #Atttribute added that represents the criticality of the task: high and low
